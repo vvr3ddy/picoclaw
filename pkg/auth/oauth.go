@@ -66,6 +66,61 @@ func decodeBase64(s string) string {
 	return string(data)
 }
 
+// ValidateAntigravityScopes checks if credentials have sufficient scopes for Cloud Code Assist.
+// Returns nil if OK, or an error with re-authentication instructions if scopes are missing.
+func ValidateAntigravityScopes(cred *AuthCredential) error {
+	if cred == nil {
+		return fmt.Errorf("no credentials found")
+	}
+
+	// Decode JWT to check scopes (format: header.payload.signature)
+	parts := strings.Split(cred.AccessToken, ".")
+	if len(parts) != 3 {
+		// Not a JWT or couldn't parse - skip validation
+		return nil
+	}
+
+	// Decode payload (base64url, add padding if needed)
+	payload := parts[1]
+	for len(payload)%4 != 0 {
+		payload += "="
+	}
+
+	decoded, err := base64.StdEncoding.DecodeString(payload)
+	if err != nil {
+		// Couldn't decode - skip validation
+		return nil
+	}
+
+	var tokenClaims struct {
+		Scope string `json:"scope"`
+	}
+	if err := json.Unmarshal(decoded, &tokenClaims); err != nil {
+		// No scope claim - that's OK, might be in token response
+		return nil
+	}
+
+	// Check for cloud-platform scope
+	tokenScopes := strings.Fields(tokenClaims.Scope)
+	hasCloudPlatform := false
+	for _, scope := range tokenScopes {
+		if strings.Contains(scope, "cloud-platform") {
+			hasCloudPlatform = true
+			break
+		}
+	}
+
+	if !hasCloudPlatform {
+		return fmt.Errorf("google-antigravity token is missing required cloud-platform scope. "+
+			"This usually means you authenticated before scopes were properly configured.\n\n"+
+			"Please re-authenticate:\n"+
+			"  picoclaw auth logout --provider google-antigravity\n"+
+			"  picoclaw auth login --provider google-antigravity")
+	}
+
+	return nil
+}
+
 func generateState() (string, error) {
 	buf := make([]byte, 32)
 	if _, err := rand.Read(buf); err != nil {

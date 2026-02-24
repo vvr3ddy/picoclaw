@@ -127,7 +127,21 @@ func (p *AntigravityProvider) Chat(
 			"model":       model,
 		})
 
-		return nil, p.parseAntigravityError(resp.StatusCode, respBody)
+		err := p.parseAntigravityError(resp.StatusCode, respBody)
+
+		// If it's a scope error, provide helpful guidance
+		if strings.Contains(err.Error(), "insufficient authentication scopes") ||
+			strings.Contains(err.Error(), "ACCESS_TOKEN_SCOPE_INSUFFICIENT") {
+			return nil, fmt.Errorf("antigravity OAuth token has insufficient scopes. "+
+				"This usually means you authenticated before scopes were properly configured.\n\n"+
+				"Please re-authenticate to get a token with the correct scopes:\n"+
+				"  picoclaw auth logout --provider google-antigravity\n"+
+				"  picoclaw auth login --provider google-antigravity\n\n"+
+				"Original error: %w",
+				err)
+		}
+
+		return nil, err
 	}
 
 	// Response is always SSE from streamGenerateContent — each line is "data: {...}"
@@ -592,6 +606,11 @@ func createAntigravityTokenSource() func() (string, string, error) {
 			return "", "", fmt.Errorf(
 				"antigravity credentials expired. Run: picoclaw auth login --provider google-antigravity",
 			)
+		}
+
+		// Validate scopes to catch authentication issues early
+		if scopeErr := auth.ValidateAntigravityScopes(cred); scopeErr != nil {
+			return "", "", scopeErr
 		}
 
 		projectID := cred.ProjectID
