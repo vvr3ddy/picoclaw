@@ -115,6 +115,8 @@ func main() {
 		authCmd()
 	case "cron":
 		cronCmd()
+	case "conscious":
+		consciousCmd()
 	case "skills":
 		if len(os.Args) < 3 {
 			skillsHelp()
@@ -183,6 +185,7 @@ func printHelp() {
 	fmt.Println("  auth        Manage authentication (login, logout, status)")
 	fmt.Println("  gateway     Start picoclaw gateway")
 	fmt.Println("  status      Show picoclaw status")
+	fmt.Println("  conscious   Manage conscious agent (reflect, thoughts, dream)")
 	fmt.Println("  cron        Manage scheduled tasks")
 	fmt.Println("  migrate     Migrate from OpenClaw to PicoClaw")
 	fmt.Println("  skills      Manage skills (install, list, remove)")
