@@ -19,6 +19,7 @@ import (
 	"github.com/sipeed/picoclaw/pkg/config"
 	"github.com/sipeed/picoclaw/pkg/cron"
 	"github.com/sipeed/picoclaw/pkg/devices"
+	"github.com/sipeed/picoclaw/pkg/dream"
 	"github.com/sipeed/picoclaw/pkg/health"
 	"github.com/sipeed/picoclaw/pkg/heartbeat"
 	"github.com/sipeed/picoclaw/pkg/logger"
@@ -112,6 +113,15 @@ func gatewayCmd() {
 		return tools.SilentResult(response)
 	})
 
+	// Setup dream service for conscious agent
+	dreamService := dream.NewDreamService(
+		cfg.WorkspacePath(),
+		cfg.Dream.IntervalMinutes,
+		agentLoop,
+		msgBus,
+		cfg,
+	)
+
 	channelManager, err := channels.NewManager(cfg, msgBus)
 	if err != nil {
 		fmt.Printf("Error creating channel manager: %v\n", err)
@@ -180,6 +190,12 @@ func gatewayCmd() {
 	}
 	fmt.Println("✓ Heartbeat service started")
 
+	if err := dreamService.Start(); err != nil {
+		fmt.Printf("Error starting dream service: %v\n", err)
+	} else if cfg.Dream.Enabled {
+		fmt.Println("✓ Dream service started (conscious agent)")
+	}
+
 	stateManager := state.NewManager(cfg.WorkspacePath())
 	deviceService := devices.NewService(devices.Config{
 		Enabled:    cfg.Devices.Enabled,
@@ -217,6 +233,7 @@ func gatewayCmd() {
 	cancel()
 	healthServer.Stop(context.Background())
 	deviceService.Stop()
+	dreamService.Stop()
 	heartbeatService.Stop()
 	cronService.Stop()
 	agentLoop.Stop()
