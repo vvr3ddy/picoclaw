@@ -69,7 +69,7 @@ You are picoclaw, a helpful AI assistant.
 ## Workspace
 Your workspace is at: %s
 - Memory: %s/memory/MEMORY.md
-- Daily Notes: %s/memory/YYYYMM/YYYYMMDD.md
+- Daily Notes: %s/memory/202602/20260224.md (format: memory/YYYYMM/YYYYMMDD.md where YYYYMM is year+month, YYYYMMDD is full date)
 - Skills: %s/skills/{skill-name}/SKILL.md
 
 %s

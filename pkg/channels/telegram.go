@@ -415,9 +415,21 @@ func (c *TelegramChannel) downloadFile(ctx context.Context, fileID, ext string) 
 }
 
 func parseChatID(chatIDStr string) (int64, error) {
+	// Strip @ prefix if present (username format)
+	chatIDStr = strings.TrimPrefix(chatIDStr, "@")
+
+	// Try to parse as integer first
 	var id int64
 	_, err := fmt.Sscanf(chatIDStr, "%d", &id)
-	return id, err
+	if err == nil {
+		return id, nil
+	}
+
+	// If not an integer, it might be a username
+	// TODO: Resolve username to chat ID using getChat API
+	return 0, fmt.Errorf("chat ID must be numeric (e.g., 123456789), not a username (@%s). "+
+		"Use your numeric user ID from https://t.me/getdivid or bot admin tools",
+		chatIDStr)
 }
 
 func markdownToTelegramHTML(text string) string {
