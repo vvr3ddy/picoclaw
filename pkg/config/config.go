@@ -56,6 +56,7 @@ type Config struct {
 	Gateway   GatewayConfig   `json:"gateway"`
 	Tools     ToolsConfig     `json:"tools"`
 	Heartbeat HeartbeatConfig `json:"heartbeat"`
+	Dream     DreamConfig     `json:"dream"`
 	Devices   DevicesConfig   `json:"devices"`
 }
 
@@ -309,6 +310,14 @@ type WeComAppConfig struct {
 type HeartbeatConfig struct {
 	Enabled  bool `json:"enabled"  env:"PICOCLAW_HEARTBEAT_ENABLED"`
 	Interval int  `json:"interval" env:"PICOCLAW_HEARTBEAT_INTERVAL"` // minutes, min 5
+}
+
+// DreamConfig configures the conscious agent dream loop
+type DreamConfig struct {
+	Enabled         bool   `json:"enabled"           env:"PICOCLAW_DREAM_ENABLED"`
+	IntervalMinutes int    `json:"interval_minutes"  env:"PICOCLAW_DREAM_INTERVAL"`    // minutes, min 15
+	ReflectionTime  string `json:"reflection_time"   env:"PICOCLAW_DREAM_REFLECTION_TIME"` // HH:MM format
+	Timezone        string `json:"timezone"          env:"PICOCLAW_DREAM_TIMEZONE"`       // IANA timezone
 }
 
 type DevicesConfig struct {
