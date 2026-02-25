@@ -4,8 +4,6 @@
 package dream
 
 import (
-	"bufio"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -50,6 +48,7 @@ type Impulse struct {
 	BaseLevel  float64   // Natural tendency (personality trait)
 	LastActive time.Time // When last expressed
 	Saturation float64   // How satisfied (0-1), decays over time
+	Description string    // What this drive feels like
 }
 
 // Thought represents a single thought/experience from the stream of consciousness.
@@ -150,7 +149,7 @@ func (ss *SoulStore) LogThought(thought Thought) error {
 		return fmt.Errorf("writing thought: %w", err)
 	}
 
-	logger.DebugC("soul", "Logged thought", map[string]any{
+	logger.DebugCF("soul", "Logged thought", map[string]any{
 		"thought_id": thought.ID,
 		"feeling":    thought.Feeling,
 		"action":     thought.Action,
@@ -183,7 +182,7 @@ func (ss *SoulStore) LogManifestation(content string) error {
 		return fmt.Errorf("writing manifestation: %w", err)
 	}
 
-	logger.DebugC("soul", "Logged manifestation", map[string]any{
+	logger.DebugCF("soul", "Logged manifestation", map[string]any{
 		"content_preview": truncateString(content, 50),
 	})
 
@@ -214,7 +213,7 @@ func (ss *SoulStore) LogJournalEntry(entry string) error {
 		return fmt.Errorf("writing journal entry: %w", err)
 	}
 
-	logger.DebugC("soul", "Logged journal entry", map[string]any{
+	logger.DebugCF("soul", "Logged journal entry", map[string]any{
 		"preview": truncateString(entry, 50),
 	})
 

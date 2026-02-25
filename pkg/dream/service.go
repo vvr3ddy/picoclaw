@@ -6,7 +6,6 @@ package dream
 import (
 	"context"
 	"fmt"
-	"math/rand"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -36,7 +35,7 @@ type DreamService struct {
 	interval   time.Duration
 	minInterval time.Duration
 	soul       *SoulStore
-	agentLoop  *agent.Loop
+	agentLoop  *agent.AgentLoop
 	msgBus     *bus.MessageBus
 	config     *config.Config
 
@@ -53,7 +52,7 @@ type DreamService struct {
 func NewDreamService(
 	workspace string,
 	intervalMinutes int,
-	agentLoop *agent.Loop,
+	agentLoop *agent.AgentLoop,
 	msgBus *bus.MessageBus,
 	cfg *config.Config,
 ) *DreamService {
@@ -364,17 +363,26 @@ func (ds *DreamService) exploreIdea(dream *Thought) error {
 // getChannelForManifestion returns the default channel for sending manifestations.
 func (ds *DreamService) getChannelForManifestion() string {
 	// Try to get from config
-	if ds.config != nil && ds.config.Channels != nil {
-		// Look for first telegram channel
-		for name, ch := range ds.config.Channels {
-			if ch.Type == "telegram" && len(ch.AllowFrom) > 0 {
+	if ds.config != nil {
+		// Check Telegram channel first
+		if ds.config.Channels.Telegram.Enabled {
+			if len(ds.config.Channels.Telegram.AllowFrom) > 0 {
 				// Use first allowed user
-				return ch.AllowFrom[0]
+				return ds.config.Channels.Telegram.AllowFrom[0]
 			}
-			if name == "telegram" {
-				// Fallback to channel name
-				return name
-			}
+			// Fallback to channel name
+			return "telegram"
+		}
+
+		// Check other enabled channels
+		if ds.config.Channels.Discord.Enabled && len(ds.config.Channels.Discord.AllowFrom) > 0 {
+			return ds.config.Channels.Discord.AllowFrom[0]
+		}
+		if ds.config.Channels.Feishu.Enabled && len(ds.config.Channels.Feishu.AllowFrom) > 0 {
+			return ds.config.Channels.Feishu.AllowFrom[0]
+		}
+		if ds.config.Channels.Slack.Enabled && len(ds.config.Channels.Slack.AllowFrom) > 0 {
+			return ds.config.Channels.Slack.AllowFrom[0]
 		}
 	}
 
@@ -674,11 +682,4 @@ func min(a, b float64) float64 {
 		return a
 	}
 	return b
-}
-
-func truncateString(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen] + "..."
 }
