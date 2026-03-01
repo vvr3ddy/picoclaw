@@ -39,6 +39,7 @@ type AgentLoop struct {
 	cfg            *config.Config
 	registry       *AgentRegistry
 	state          *state.Manager
+	checkpoint     *state.CheckpointManager
 	running        atomic.Bool
 	summarizing    sync.Map
 	fallback       *providers.FallbackChain
@@ -73,8 +74,10 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus, provider providers
 	// Create state manager using default agent's workspace for channel recording
 	defaultAgent := registry.GetDefaultAgent()
 	var stateManager *state.Manager
+	var checkpointManager *state.CheckpointManager
 	if defaultAgent != nil {
 		stateManager = state.NewManager(defaultAgent.Workspace)
+		checkpointManager = state.NewCheckpointManager(defaultAgent.Workspace)
 	}
 
 	return &AgentLoop{
@@ -82,6 +85,7 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus, provider providers
 		cfg:         cfg,
 		registry:    registry,
 		state:       stateManager,
+		checkpoint:  checkpointManager,
 		summarizing: sync.Map{},
 		fallback:    fallbackChain,
 	}
@@ -245,6 +249,70 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 
 func (al *AgentLoop) Stop() {
 	al.running.Store(false)
+
+	// Mark checkpoint as clean for graceful shutdown
+	if al.checkpoint != nil {
+		if err := al.checkpoint.MarkClean(); err != nil {
+			logger.WarnCF("agent", "Failed to mark checkpoint clean on stop", map[string]any{
+				"error": err.Error(),
+			})
+		}
+	}
+}
+
+// IsRecoveryNeeded returns true if the agent needs to recover from a crash.
+func (al *AgentLoop) IsRecoveryNeeded() bool {
+	if al.checkpoint == nil {
+		return false
+	}
+	return al.checkpoint.IsRecoveryNeeded()
+}
+
+// Recover attempts to restore agent state from the last checkpoint.
+// Returns the recovered session information if successful.
+func (al *AgentLoop) Recover() (*state.Checkpoint, error) {
+	if al.checkpoint == nil {
+		return nil, errors.New("checkpoint manager not initialized")
+	}
+
+	if !al.checkpoint.IsRecoveryNeeded() {
+		return nil, nil // No recovery needed
+	}
+
+	cp := al.checkpoint.GetCheckpoint()
+	if cp == nil {
+		return nil, errors.New("no checkpoint available for recovery")
+	}
+
+	// Restore session messages
+	agent, ok := al.registry.GetAgent(cp.ActiveAgent)
+	if !ok {
+		agent = al.registry.GetDefaultAgent()
+	}
+	if agent == nil {
+		return nil, errors.New("no agent available for recovery")
+	}
+
+	messages := al.checkpoint.GetMessages()
+	agent.Sessions.SetHistory(cp.SessionID, messages)
+
+	logger.InfoCF("agent", "Recovered from checkpoint",
+		map[string]any{
+			"session_id":    cp.SessionID,
+			"agent_id":      cp.ActiveAgent,
+			"message_count": len(messages),
+			"last_action":   cp.LastAction,
+		})
+
+	return cp, nil
+}
+
+// ClearCheckpoint clears the current checkpoint after successful recovery.
+func (al *AgentLoop) ClearCheckpoint() error {
+	if al.checkpoint == nil {
+		return nil
+	}
+	return al.checkpoint.Clear()
 }
 
 func (al *AgentLoop) RegisterTool(tool tools.Tool) {
@@ -527,7 +595,25 @@ func (al *AgentLoop) runAgentLoop(ctx context.Context, agent *AgentInstance, opt
 	// 3. Save user message to session
 	agent.Sessions.AddMessage(opts.SessionKey, "user", opts.UserMessage)
 
-	// 4. Run LLM iteration loop
+	// 4. Save checkpoint before LLM iteration (dirty state = in progress)
+	if al.checkpoint != nil && !opts.NoHistory {
+		sessionMessages := agent.Sessions.GetHistory(opts.SessionKey)
+		if err := al.checkpoint.SaveDirty(
+			opts.SessionKey,
+			sessionMessages,
+			agent.ID,
+			opts.Channel,
+			opts.ChatID,
+			"processing",
+			nil,
+		); err != nil {
+			logger.WarnCF("agent", "Failed to save dirty checkpoint", map[string]any{
+				"error": err.Error(),
+			})
+		}
+	}
+
+	// 5. Run LLM iteration loop
 	finalContent, iteration, err := al.runLLMIteration(ctx, agent, messages, opts)
 	if err != nil {
 		return "", err
@@ -536,21 +622,37 @@ func (al *AgentLoop) runAgentLoop(ctx context.Context, agent *AgentInstance, opt
 	// If last tool had ForUser content and we already sent it, we might not need to send final response
 	// This is controlled by the tool's Silent flag and ForUser content
 
-	// 5. Handle empty response
+	// 6. Handle empty response
 	if finalContent == "" {
 		finalContent = opts.DefaultResponse
 	}
 
-	// 6. Save final assistant message to session
+	// 7. Save final assistant message to session
 	agent.Sessions.AddMessage(opts.SessionKey, "assistant", finalContent)
 	agent.Sessions.Save(opts.SessionKey)
 
-	// 7. Optional: summarization
+	// 8. Save checkpoint after successful completion (clean state)
+	if al.checkpoint != nil && !opts.NoHistory {
+		sessionMessages := agent.Sessions.GetHistory(opts.SessionKey)
+		if err := al.checkpoint.SaveClean(
+			opts.SessionKey,
+			sessionMessages,
+			agent.ID,
+			opts.Channel,
+			opts.ChatID,
+		); err != nil {
+			logger.WarnCF("agent", "Failed to save clean checkpoint", map[string]any{
+				"error": err.Error(),
+			})
+		}
+	}
+
+	// 9. Optional: summarization
 	if opts.EnableSummary {
 		al.maybeSummarize(agent, opts.SessionKey, opts.Channel, opts.ChatID)
 	}
 
-	// 8. Optional: send response via bus
+	// 10. Optional: send response via bus
 	if opts.SendResponse {
 		audit.LogMessage(ctx, "outbound", "text", finalContent, "")
 		al.bus.PublishOutbound(ctx, bus.OutboundMessage{
@@ -560,7 +662,7 @@ func (al *AgentLoop) runAgentLoop(ctx context.Context, agent *AgentInstance, opt
 		})
 	}
 
-	// 9. Log response
+	// 11. Log response
 	responsePreview := utils.Truncate(finalContent, 120)
 	logger.InfoCF("agent", fmt.Sprintf("Response: %s", responsePreview),
 		map[string]any{
