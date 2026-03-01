@@ -16,6 +16,7 @@ type SubagentTask struct {
 	Task          string
 	Label         string
 	AgentID       string
+	Model         string // Optional custom model for this task
 	OriginChannel string
 	OriginChatID  string
 	Status        string
@@ -24,19 +25,20 @@ type SubagentTask struct {
 }
 
 type SubagentManager struct {
-	tasks          map[string]*SubagentTask
-	mu             sync.RWMutex
-	provider       providers.LLMProvider
-	defaultModel   string
-	bus            *bus.MessageBus
-	workspace      string
-	tools          *ToolRegistry
-	maxIterations  int
-	maxTokens      int
-	temperature    float64
-	hasMaxTokens   bool
-	hasTemperature bool
-	nextID         int
+	tasks            map[string]*SubagentTask
+	mu               sync.RWMutex
+	provider         providers.LLMProvider
+	defaultModel     string
+	bus              *bus.MessageBus
+	workspace        string
+	tools            *ToolRegistry
+	maxIterations    int
+	maxTokens        int
+	temperature      float64
+	hasMaxTokens     bool
+	hasTemperature   bool
+	nextID           int
+	providerRegistry *providers.ProviderRegistry // For resolving models to providers
 }
 
 func NewSubagentManager(
@@ -66,6 +68,14 @@ func (sm *SubagentManager) SetLLMOptions(maxTokens int, temperature float64) {
 	sm.hasTemperature = true
 }
 
+// SetProviderRegistry sets the provider registry for resolving models to providers.
+// This enables subagents to use different providers when a specific model is specified.
+func (sm *SubagentManager) SetProviderRegistry(registry *providers.ProviderRegistry) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.providerRegistry = registry
+}
+
 // SetTools sets the tool registry for subagent execution.
 // If not set, subagent will have access to the provided tools.
 func (sm *SubagentManager) SetTools(tools *ToolRegistry) {
@@ -83,7 +93,7 @@ func (sm *SubagentManager) RegisterTool(tool Tool) {
 
 func (sm *SubagentManager) Spawn(
 	ctx context.Context,
-	task, label, agentID, originChannel, originChatID string,
+	task, label, agentID, model, originChannel, originChatID string,
 	callback AsyncCallback,
 ) (string, error) {
 	sm.mu.Lock()
@@ -97,6 +107,7 @@ func (sm *SubagentManager) Spawn(
 		Task:          task,
 		Label:         label,
 		AgentID:       agentID,
+		Model:         model,
 		OriginChannel: originChannel,
 		OriginChatID:  originChatID,
 		Status:        "running",
@@ -154,6 +165,32 @@ After completing the task, provide a clear summary of what was done.`
 	hasTemperature := sm.hasTemperature
 	sm.mu.RUnlock()
 
+	// Determine provider and model to use
+	var providerToUse providers.LLMProvider
+	var modelToUse string
+
+	if task.Model != "" && sm.providerRegistry != nil {
+		// Custom model specified - resolve it to get the appropriate provider
+		provider, modelID, err := sm.providerRegistry.GetProviderForModel(task.Model)
+		if err != nil {
+			sm.mu.Lock()
+			task.Status = "failed"
+			sanitizedErr := utils.SanitizeError(err.Error())
+			task.Result = fmt.Sprintf("Error resolving model %q: %s", task.Model, sanitizedErr)
+			sm.mu.Unlock()
+			// Can't return early, need to continue to call callback
+			providerToUse = sm.provider // Fallback to default
+			modelToUse = sm.defaultModel
+		} else {
+			providerToUse = provider
+			modelToUse = modelID
+		}
+	} else {
+		// Use default provider and model
+		providerToUse = sm.provider
+		modelToUse = sm.defaultModel
+	}
+
 	var llmOptions map[string]any
 	if hasMaxTokens || hasTemperature {
 		llmOptions = map[string]any{}
@@ -166,8 +203,8 @@ After completing the task, provide a clear summary of what was done.`
 	}
 
 	loopResult, err := RunToolLoop(ctx, ToolLoopConfig{
-		Provider:      sm.provider,
-		Model:         sm.defaultModel,
+		Provider:      providerToUse,
+		Model:         modelToUse,
 		Tools:         tools,
 		MaxIterations: maxIter,
 		LLMOptions:    llmOptions,

@@ -85,6 +85,55 @@ func (pr *ProviderRegistry) GetProvider(providerName string) (LLMProvider, error
 	return provider, nil
 }
 
+// GetProviderForModel returns a provider suitable for the given model name.
+// It looks up the model in the model list to determine the provider type,
+// then creates/gets the provider for that type.
+// This enables subagents to use different providers based on model selection.
+func (pr *ProviderRegistry) GetProviderForModel(modelName string) (LLMProvider, string, error) {
+	// Look up the model config to find the provider type
+	var modelCfg *config.ModelConfig
+	for i := range pr.modelList {
+		cfg := &pr.modelList[i]
+		if strings.EqualFold(cfg.ModelName, modelName) {
+			modelCfg = cfg
+			break
+		}
+	}
+
+	// If not found by name, try looking up by full model string
+	if modelCfg == nil {
+		for i := range pr.modelList {
+			cfg := &pr.modelList[i]
+			// Check if model string ends with the requested model name
+			if strings.HasSuffix(cfg.Model, "/"+modelName) || cfg.Model == modelName {
+				modelCfg = cfg
+				break
+			}
+		}
+	}
+
+	if modelCfg == nil {
+		return nil, "", fmt.Errorf("model %q not found in model list", modelName)
+	}
+
+	// Extract provider protocol from model string
+	protocol, _ := ExtractProtocol(modelCfg.Model)
+	if protocol == "" {
+		protocol = "openai" // Default
+	}
+
+	// Get the provider for this protocol
+	provider, err := pr.GetProvider(protocol)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to get provider for model %q: %w", modelName, err)
+	}
+
+	// Return the model string (without protocol prefix) for the Chat call
+	modelID := strings.TrimPrefix(modelCfg.Model, protocol+"/")
+
+	return provider, modelID, nil
+}
+
 // GetDefaultProvider returns the provider for the default/primary protocol.
 // This is used for backward compatibility with code that expects a single provider.
 func (pr *ProviderRegistry) GetDefaultProvider() (LLMProvider, error) {

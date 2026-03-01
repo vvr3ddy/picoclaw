@@ -118,7 +118,7 @@ func TestNewAgentInstance_ResolveCandidatesFromModelListAlias(t *testing.T) {
 	}
 
 	provider := &mockProvider{}
-	agent := NewAgentInstance(nil, &cfg.Agents.Defaults, cfg, provider)
+	agent := NewAgentInstance(nil, &cfg.Agents.Defaults, cfg, provider, nil)
 
 	if len(agent.Candidates) != 1 {
 		t.Fatalf("len(Candidates) = %d, want 1", len(agent.Candidates))
@@ -155,7 +155,7 @@ func TestNewAgentInstance_ResolveCandidatesFromModelListAliasWithoutProtocol(t *
 	}
 
 	provider := &mockProvider{}
-	agent := NewAgentInstance(nil, &cfg.Agents.Defaults, cfg, provider)
+	agent := NewAgentInstance(nil, &cfg.Agents.Defaults, cfg, provider, nil)
 
 	if len(agent.Candidates) != 1 {
 		t.Fatalf("len(Candidates) = %d, want 1", len(agent.Candidates))

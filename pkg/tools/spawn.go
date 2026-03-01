@@ -53,6 +53,10 @@ func (t *SpawnTool) Parameters() map[string]any {
 				"type":        "string",
 				"description": "Optional target agent ID to delegate the task to",
 			},
+			"model": map[string]any{
+				"type":        "string",
+				"description": "Optional model to use for the subagent (e.g., 'cerebras-gpt-oss-120b'). If not specified, uses the parent agent's model",
+			},
 		},
 		"required": []string{"task"},
 	}
@@ -75,6 +79,7 @@ func (t *SpawnTool) Execute(ctx context.Context, args map[string]any) *ToolResul
 
 	label, _ := args["label"].(string)
 	agentID, _ := args["agent_id"].(string)
+	model, _ := args["model"].(string)
 
 	// Check allowlist if targeting a specific agent
 	if agentID != "" && t.allowlistCheck != nil {
@@ -88,7 +93,7 @@ func (t *SpawnTool) Execute(ctx context.Context, args map[string]any) *ToolResul
 	}
 
 	// Pass callback to manager for async completion notification
-	result, err := t.manager.Spawn(ctx, task, label, agentID, t.originChannel, t.originChatID, t.callback)
+	result, err := t.manager.Spawn(ctx, task, label, agentID, model, t.originChannel, t.originChatID, t.callback)
 	if err != nil {
 		// Sanitize error to prevent exposure of sensitive config data
 		sanitizedErr := utils.SanitizeError(err.Error())
