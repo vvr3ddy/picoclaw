@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -853,11 +854,11 @@ func (al *AgentLoop) runLLMIteration(
 				Channel:   opts.Channel,
 				ChatID:    opts.ChatID,
 				ToolCall: &audit.ToolCallData{
-					ToolID: tc.ID,
-					Name:   tc.Name,
+					ToolID:    tc.ID,
+					Name:      tc.Name,
 					Arguments: tc.Arguments,
-					IsAsync: false,
-					IsError: false,
+					IsAsync:   false,
+					IsError:   false,
 				},
 			})
 		}
@@ -1410,9 +1411,93 @@ func (al *AgentLoop) handleCommand(ctx context.Context, msg bus.InboundMessage) 
 		default:
 			return fmt.Sprintf("Unknown switch target: %s", target), true
 		}
+
+	case "/compact":
+		return al.handleCompact(ctx, msg, args)
+
+	case "/clear":
+		return al.handleClear(ctx, msg, args)
 	}
 
 	return "", false
+}
+
+// handleCompact handles the /compact command to summarize and reduce conversation history.
+// It writes the summary to session_summary.md and clears the history.
+func (al *AgentLoop) handleCompact(ctx context.Context, msg bus.InboundMessage, args []string) (string, bool) {
+	// Determine session key - use the message's session or default to main agent session
+	sessionKey := routing.BuildAgentMainSessionKey("main")
+	if msg.SessionKey != "" {
+		sessionKey = msg.SessionKey
+	}
+
+	agent := al.registry.GetDefaultAgent()
+	if agent == nil {
+		return "No default agent configured", true
+	}
+
+	history := agent.Sessions.GetHistory(sessionKey)
+	summary := agent.Sessions.GetSummary(sessionKey)
+
+	if len(history) <= 4 && summary == "" {
+		return "Conversation is already minimal - no compaction needed", true
+	}
+
+	// If no summary exists yet, create one by calling summarizeSession
+	if summary == "" {
+		logger.InfoCF("agent", "Compacting session (generating summary)", map[string]any{
+			"session_key": sessionKey,
+			"history_len": len(history),
+		})
+
+		// Use existing summarization logic
+		al.summarizeSession(agent, sessionKey)
+		summary = agent.Sessions.GetSummary(sessionKey)
+	}
+
+	// Write summary to session_summary.md
+	if summary != "" {
+		summaryFile := filepath.Join(agent.Workspace, "memory", "session_summary.md")
+		// Ensure memory directory exists
+		os.MkdirAll(filepath.Dir(summaryFile), 0o755)
+
+		header := fmt.Sprintf("# Session Summary\n\nGenerated: %s\n\n---\n\n", time.Now().Format("2006-01-02 15:04"))
+		content := header + summary
+
+		if err := os.WriteFile(summaryFile, []byte(content), 0o644); err != nil {
+			logger.WarnCF("agent", "Failed to write session_summary.md", map[string]any{
+				"error": err.Error(),
+			})
+		} else {
+			logger.InfoCF("agent", "Session summary written to memory/session_summary.md", map[string]any{
+				"session_key": sessionKey,
+			})
+		}
+	}
+
+	// Clear the history (keep the summary in memory)
+	agent.Sessions.TruncateHistory(sessionKey, 0)
+
+	return "✅ Session compacted! Summary saved to memory/session_summary.md. Conversation history cleared.", true
+}
+
+// handleClear handles the /clear command to clear session history and summary.
+func (al *AgentLoop) handleClear(ctx context.Context, msg bus.InboundMessage, args []string) (string, bool) {
+	sessionKey := routing.BuildAgentMainSessionKey("main")
+	if msg.SessionKey != "" {
+		sessionKey = msg.SessionKey
+	}
+
+	agent := al.registry.GetDefaultAgent()
+	if agent == nil {
+		return "No default agent configured", true
+	}
+
+	// Clear history and summary
+	agent.Sessions.TruncateHistory(sessionKey, 0)
+	agent.Sessions.SetSummary(sessionKey, "")
+
+	return "✅ Session cleared! All conversation history and summary have been removed.", true
 }
 
 // extractPeer extracts the routing peer from the inbound message's structured Peer field.
