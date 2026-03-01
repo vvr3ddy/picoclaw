@@ -25,11 +25,11 @@ import (
 //
 // The filename pattern is: audit-DDMMYYYY.log[.N][.gz]
 type rotatingWriter struct {
-	baseDir    string
-	baseName   string
-	extension  string
-	rotation   config.RotationConfig
-	format     string
+	baseDir   string
+	baseName  string
+	extension string
+	rotation  config.RotationConfig
+	format    string
 
 	// Current file state
 	currentFile *os.File
@@ -130,13 +130,8 @@ func (rw *rotatingWriter) rotate() error {
 	// Generate new filename
 	newPath := filepath.Join(rw.baseDir, rw.baseName+rw.currentDate+rw.extension)
 
-	// Check if file already exists (from previous run)
-	// If so, find next available number
-	if _, err := os.Stat(newPath); err == nil {
-		newPath = rw.findNextAvailableName()
-	}
-
-	// Create new file with secure permissions
+	// Create new file (or open existing) with secure permissions
+	// O_APPEND ensures we append to existing file on same day restart
 	file, err := os.OpenFile(newPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 	if err != nil {
 		return fmt.Errorf("failed to create new log file: %w", err)
@@ -154,14 +149,14 @@ func (rw *rotatingWriter) rotate() error {
 // findNextAvailableName finds the next available numbered filename.
 func (rw *rotatingWriter) findNextAvailableName() string {
 	base := filepath.Join(rw.baseDir, rw.baseName+rw.currentDate)
-	
+
 	for i := 1; i < 1000; i++ {
 		candidate := fmt.Sprintf("%s.%d%s", base, i, rw.extension)
 		if _, err := os.Stat(candidate); os.IsNotExist(err) {
 			return candidate
 		}
 	}
-	
+
 	// Fallback with timestamp
 	return fmt.Sprintf("%s.%d%s", base, time.Now().Unix(), rw.extension)
 }
