@@ -9,6 +9,7 @@ import (
 	"github.com/caarlos0/env/v11"
 
 	"github.com/sipeed/picoclaw/pkg/fileutil"
+	"github.com/sipeed/picoclaw/pkg/utils"
 )
 
 // rrCounter is a global counter for round-robin load balancing across models.
@@ -387,11 +388,11 @@ type DevicesConfig struct {
 // Audit logs provide a complete trail of bot activity for debugging, compliance,
 // and security analysis.
 type AuditConfig struct {
-	Enabled  bool        `json:"enabled"  env:"PICOCLAW_AUDIT_ENABLED"`
-	Location string      `json:"location" env:"PICOCLAW_AUDIT_LOCATION"`
+	Enabled  bool           `json:"enabled"  env:"PICOCLAW_AUDIT_ENABLED"`
+	Location string         `json:"location" env:"PICOCLAW_AUDIT_LOCATION"`
 	Rotation RotationConfig `json:"rotation"`
-	Events   AuditEvents `json:"events"`
-	Format   string      `json:"format"   env:"PICOCLAW_AUDIT_FORMAT"` // "json" or "text"
+	Events   AuditEvents    `json:"events"`
+	Format   string         `json:"format"   env:"PICOCLAW_AUDIT_FORMAT"` // "json" or "text"
 }
 
 // RotationConfig controls log file rotation to prevent disk space exhaustion.
@@ -617,6 +618,9 @@ func LoadConfig(path string) (*Config, error) {
 
 	// Pre-scan the JSON to check how many model_list entries the user provided.
 	// Go's JSON decoder reuses existing slice backing-array elements rather than
+	// Expand environment variables like ${VAR} and ${VAR:-default} in the JSON data
+	data = utils.ExpandEnvVarsInJSON(data)
+
 	// zero-initializing them, so fields absent from the user's JSON (e.g. api_base)
 	// would silently inherit values from the DefaultConfig template at the same
 	// index position. We only reset cfg.ModelList when the user actually provides

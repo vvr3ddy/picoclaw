@@ -2,7 +2,9 @@ package utils
 
 import (
 	"fmt"
+	"os"
 	"regexp"
+	"strings"
 )
 
 // Redactor sanitizes sensitive information from strings.
@@ -113,4 +115,51 @@ func SanitizeErrorf(format string, args ...any) string {
 // This is useful when logging or returning config-related errors.
 func RedactConfigJSON(jsonStr string) string {
 	return DefaultRedactor.Redact(jsonStr)
+}
+
+// envVarPattern matches ${VAR} or ${VAR:-default} syntax
+var envVarPattern = regexp.MustCompile(`\$\{([^}]+)\}`)
+
+// ExpandEnvVars expands ${VAR} and ${VAR:-default} syntax in strings.
+// It looks up environment variables and replaces the placeholders with their values.
+// If a variable is not set and no default is provided, the placeholder is left as-is.
+func ExpandEnvVars(s string) string {
+	if s == "" {
+		return s
+	}
+
+	return envVarPattern.ReplaceAllStringFunc(s, func(match string) string {
+		// Extract content between ${ and }
+		content := match[2 : len(match)-1]
+
+		// Check for default value syntax: ${VAR:-default}
+		if idx := strings.Index(content, ":-"); idx != -1 {
+			varName := content[:idx]
+			defaultValue := content[idx+2:]
+			if value := os.Getenv(varName); value != "" {
+				return value
+			}
+			return defaultValue
+		}
+
+		// Simple ${VAR} syntax
+		if value := os.Getenv(content); value != "" {
+			return value
+		}
+
+		// Variable not set, return original placeholder
+		return match
+	})
+}
+
+// ExpandEnvVarsInJSON expands environment variables in JSON byte data.
+// It handles ${VAR} and ${VAR:-default} syntax throughout the JSON.
+func ExpandEnvVarsInJSON(data []byte) []byte {
+	if len(data) == 0 {
+		return data
+	}
+
+	// Convert to string, expand, and convert back
+	expanded := ExpandEnvVars(string(data))
+	return []byte(expanded)
 }
