@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/sipeed/picoclaw/pkg/utils"
 )
 
 type SpawnTool struct {
@@ -88,7 +90,9 @@ func (t *SpawnTool) Execute(ctx context.Context, args map[string]any) *ToolResul
 	// Pass callback to manager for async completion notification
 	result, err := t.manager.Spawn(ctx, task, label, agentID, t.originChannel, t.originChatID, t.callback)
 	if err != nil {
-		return ErrorResult(fmt.Sprintf("failed to spawn subagent: %v", err))
+		// Sanitize error to prevent exposure of sensitive config data
+		sanitizedErr := utils.SanitizeError(err.Error())
+		return ErrorResult(fmt.Sprintf("failed to spawn subagent: %s", sanitizedErr))
 	}
 
 	// Return AsyncResult since the task runs in background

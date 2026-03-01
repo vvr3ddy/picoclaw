@@ -8,6 +8,7 @@ import (
 
 	"github.com/sipeed/picoclaw/pkg/bus"
 	"github.com/sipeed/picoclaw/pkg/providers"
+	"github.com/sipeed/picoclaw/pkg/utils"
 )
 
 type SubagentTask struct {
@@ -184,7 +185,9 @@ After completing the task, provide a clear summary of what was done.`
 
 	if err != nil {
 		task.Status = "failed"
-		task.Result = fmt.Sprintf("Error: %v", err)
+		// Sanitize error to prevent exposure of sensitive config data
+		sanitizedErr := utils.SanitizeError(err.Error())
+		task.Result = fmt.Sprintf("Error: %s", sanitizedErr)
 		// Check if it was canceled
 		if ctx.Err() != nil {
 			task.Status = "canceled"
@@ -349,7 +352,9 @@ func (t *SubagentTool) Execute(ctx context.Context, args map[string]any) *ToolRe
 		LLMOptions:    llmOptions,
 	}, messages, t.originChannel, t.originChatID)
 	if err != nil {
-		return ErrorResult(fmt.Sprintf("Subagent execution failed: %v", err)).WithError(err)
+		// Sanitize error to prevent exposure of sensitive config data
+		sanitizedErr := utils.SanitizeError(err.Error())
+		return ErrorResult(fmt.Sprintf("Subagent execution failed: %s", sanitizedErr)).WithError(err)
 	}
 
 	// ForUser: Brief summary for user (truncated if too long)
