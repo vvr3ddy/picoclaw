@@ -408,9 +408,10 @@ func (cs *CronService) removeJobUnsafe(jobID string) bool {
 	before := len(cs.store.Jobs)
 	var jobs []CronJob
 	for _, job := range cs.store.Jobs {
-		if job.ID != jobID {
-			jobs = append(jobs, job)
+		if job.ID == jobID {
+			continue
 		}
+		jobs = append(jobs, job)
 	}
 	cs.store.Jobs = jobs
 	removed := len(cs.store.Jobs) < before
@@ -418,6 +419,7 @@ func (cs *CronService) removeJobUnsafe(jobID string) bool {
 	if removed {
 		if err := cs.saveStoreUnsafe(); err != nil {
 			log.Printf("[cron] failed to save store after remove: %v", err)
+			return false
 		}
 	}
 
