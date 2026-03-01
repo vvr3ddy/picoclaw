@@ -203,7 +203,7 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 
 				response, err := al.processMessage(ctx, msg)
 				if err != nil {
-					response = fmt.Sprintf("Error processing message: %v", err)
+					response = fmt.Sprintf("Error processing message: %s", utils.SanitizeError(err.Error()))
 				}
 
 				if response != "" {
