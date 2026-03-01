@@ -22,6 +22,9 @@ type ContextBuilder struct {
 	skillsLoader *skills.SkillsLoader
 	memory       *MemoryStore
 
+	// Ignore patterns from .picoclawignore
+	ignorePatterns []string
+
 	// Cache for system prompt to avoid rebuilding on every call.
 	// This fixes issue #607: repeated reprocessing of the entire context.
 	// The cache auto-invalidates when workspace source files change (mtime check).
@@ -51,11 +54,68 @@ func NewContextBuilder(workspace string) *ContextBuilder {
 	builtinSkillsDir := filepath.Join(wd, "skills")
 	globalSkillsDir := filepath.Join(getGlobalConfigDir(), "skills")
 
-	return &ContextBuilder{
+	cb := &ContextBuilder{
 		workspace:    workspace,
 		skillsLoader: skills.NewSkillsLoader(workspace, globalSkillsDir, builtinSkillsDir),
 		memory:       NewMemoryStore(workspace),
 	}
+
+	// Load ignore patterns from .picoclawignore
+	cb.loadIgnorePatterns()
+
+	return cb
+}
+
+// loadIgnorePatterns reads .picoclawignore file from workspace root
+func (cb *ContextBuilder) loadIgnorePatterns() {
+	ignoreFile := filepath.Join(cb.workspace, ".picoclawignore")
+	data, err := os.ReadFile(ignoreFile)
+	if err != nil {
+		// No ignore file - use defaults
+		cb.ignorePatterns = []string{
+			"logs/",
+			"health/",
+			"sessions/",
+			"state/",
+			"projects/",
+		}
+		logger.DebugCF("agent", "Using default ignore patterns", map[string]any{
+			"patterns": cb.ignorePatterns,
+		})
+		return
+	}
+
+	// Parse ignore file - one pattern per line, # comments
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		// Normalize path - ensure trailing slash for directories
+		if !strings.HasSuffix(line, "/") && !strings.Contains(line, ".") {
+			line = line + "/"
+		}
+		cb.ignorePatterns = append(cb.ignorePatterns, line)
+	}
+
+	logger.InfoCF("agent", "Loaded ignore patterns", map[string]any{
+		"patterns": cb.ignorePatterns,
+	})
+}
+
+// shouldIgnore returns true if the given path should be ignored
+func (cb *ContextBuilder) shouldIgnore(path string) bool {
+	for _, pattern := range cb.ignorePatterns {
+		if strings.HasPrefix(path, pattern) {
+			return true
+		}
+		// Also check if pattern is prefix of path
+		if strings.Contains(path, pattern) {
+			return true
+		}
+	}
+	return false
 }
 
 func (cb *ContextBuilder) getIdentity() string {

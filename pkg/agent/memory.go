@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/sipeed/picoclaw/pkg/fileutil"
+	"github.com/sipeed/picoclaw/pkg/logger"
 )
 
 // MemoryStore manages persistent memory for the agent.
@@ -120,17 +121,31 @@ func (ms *MemoryStore) AppendToday(content string) error {
 
 // GetRecentDailyNotes returns daily notes from the last N days.
 // Contents are joined with "---" separator.
+// Limits to last 3 days by default to avoid token bloat.
 func (ms *MemoryStore) GetRecentDailyNotes(days int) string {
+	if days <= 0 {
+		days = 3
+	}
+
 	var sb strings.Builder
 	first := true
 
-	for i := range days {
+	for i := 0; i < days; i++ {
 		date := time.Now().AddDate(0, 0, -i)
 		dateStr := date.Format("20060102") // YYYYMMDD
 		monthDir := dateStr[:6]            // YYYYMM
 		filePath := filepath.Join(ms.memoryDir, monthDir, dateStr+".md")
 
 		if data, err := os.ReadFile(filePath); err == nil {
+			// Skip if file is too large (> 50KB) to prevent token bloat
+			if len(data) > 50*1024 {
+				logger.WarnCF("memory", "Skipping large daily note", map[string]any{
+					"path": filePath,
+					"size": len(data),
+				})
+				continue
+			}
+
 			if !first {
 				sb.WriteString("\n\n---\n\n")
 			}
@@ -144,6 +159,9 @@ func (ms *MemoryStore) GetRecentDailyNotes(days int) string {
 
 // GetMemoryContext returns formatted memory context for the agent prompt.
 // Includes long-term memory, recent daily notes, and session summaries.
+// Limits total output to prevent token overflow.
+const maxMemoryContextBytes = 10 * 1024 // 10KB max
+
 func (ms *MemoryStore) GetMemoryContext() string {
 	longTerm := ms.ReadLongTerm()
 	recentNotes := ms.GetRecentDailyNotes(3)
@@ -155,15 +173,26 @@ func (ms *MemoryStore) GetMemoryContext() string {
 
 	var sb strings.Builder
 
-	// Session summary (from /compact command)
+	// Session summary (from /compact command) - highest priority
 	if sessionSummary != "" {
 		sb.WriteString("## Session Summary\n\n")
+		// Truncate if too long
+		if len(sessionSummary) > 2000 {
+			sessionSummary = sessionSummary[:2000] + "..."
+		}
 		sb.WriteString(sessionSummary)
 		sb.WriteString("\n\n")
 	}
 
 	if longTerm != "" {
 		sb.WriteString("## Long-term Memory\n\n")
+		// Truncate if exceeding limit
+		if sb.Len()+len(longTerm) > maxMemoryContextBytes {
+			truncateAt := maxMemoryContextBytes - sb.Len() - 50
+			if truncateAt > 0 {
+				longTerm = longTerm[:truncateAt] + "\n... (truncated)"
+			}
+		}
 		sb.WriteString(longTerm)
 	}
 
