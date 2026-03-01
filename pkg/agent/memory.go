@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/sipeed/picoclaw/pkg/fileutil"
 	"github.com/sipeed/picoclaw/pkg/logger"
@@ -176,9 +177,10 @@ func (ms *MemoryStore) GetMemoryContext() string {
 	// Session summary (from /compact command) - highest priority
 	if sessionSummary != "" {
 		sb.WriteString("## Session Summary\n\n")
-		// Truncate if too long
-		if len(sessionSummary) > 2000 {
-			sessionSummary = sessionSummary[:2000] + "..."
+		// Truncate if too long - use UTF-8 safe truncation
+		if utf8.RuneCountInString(sessionSummary) > 2000 {
+			runes := []rune(sessionSummary)
+			sessionSummary = string(runes[:2000]) + "..."
 		}
 		sb.WriteString(sessionSummary)
 		sb.WriteString("\n\n")
@@ -186,11 +188,21 @@ func (ms *MemoryStore) GetMemoryContext() string {
 
 	if longTerm != "" {
 		sb.WriteString("## Long-term Memory\n\n")
-		// Truncate if exceeding limit
-		if sb.Len()+len(longTerm) > maxMemoryContextBytes {
+		// Truncate if exceeding limit - handle overflow case
+		if sb.Len() >= maxMemoryContextBytes {
+			// Buffer already full, skip longTerm
+			logger.DebugCF("memory", "Skipping long-term memory - buffer full", map[string]any{
+				"current_size": sb.Len(),
+				"max_size":     maxMemoryContextBytes,
+			})
+		} else if sb.Len()+len(longTerm) > maxMemoryContextBytes {
 			truncateAt := maxMemoryContextBytes - sb.Len() - 50
 			if truncateAt > 0 {
-				longTerm = longTerm[:truncateAt] + "\n... (truncated)"
+				// Use UTF-8 safe truncation
+				if utf8.RuneCountInString(longTerm) > truncateAt {
+					runes := []rune(longTerm)
+					longTerm = string(runes[:truncateAt]) + "\n... (truncated)"
+				}
 			}
 		}
 		sb.WriteString(longTerm)
