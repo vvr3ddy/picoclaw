@@ -19,10 +19,12 @@ import (
 // MemoryStore manages persistent memory for the agent.
 // - Long-term memory: memory/MEMORY.md
 // - Daily notes: memory/YYYYMM/YYYYMMDD.md
+// - Session summary: memory/session_summary.md
 type MemoryStore struct {
-	workspace  string
-	memoryDir  string
-	memoryFile string
+	workspace          string
+	memoryDir          string
+	memoryFile         string
+	sessionSummaryFile string
 }
 
 // NewMemoryStore creates a new MemoryStore with the given workspace path.
@@ -30,14 +32,16 @@ type MemoryStore struct {
 func NewMemoryStore(workspace string) *MemoryStore {
 	memoryDir := filepath.Join(workspace, "memory")
 	memoryFile := filepath.Join(memoryDir, "MEMORY.md")
+	sessionSummaryFile := filepath.Join(memoryDir, "session_summary.md")
 
 	// Ensure memory directory exists
 	os.MkdirAll(memoryDir, 0o755)
 
 	return &MemoryStore{
-		workspace:  workspace,
-		memoryDir:  memoryDir,
-		memoryFile: memoryFile,
+		workspace:          workspace,
+		memoryDir:          memoryDir,
+		memoryFile:         memoryFile,
+		sessionSummaryFile: sessionSummaryFile,
 	}
 }
 
@@ -63,6 +67,15 @@ func (ms *MemoryStore) WriteLongTerm(content string) error {
 	// Use unified atomic write utility with explicit sync for flash storage reliability.
 	// Using 0o600 (owner read/write only) for secure default permissions.
 	return fileutil.WriteFileAtomic(ms.memoryFile, []byte(content), 0o600)
+}
+
+// ReadSessionSummary reads the session summary file (session_summary.md).
+// Returns empty string if the file doesn't exist.
+func (ms *MemoryStore) ReadSessionSummary() string {
+	if data, err := os.ReadFile(ms.sessionSummaryFile); err == nil {
+		return string(data)
+	}
+	return ""
 }
 
 // ReadToday reads today's daily note.
@@ -130,16 +143,24 @@ func (ms *MemoryStore) GetRecentDailyNotes(days int) string {
 }
 
 // GetMemoryContext returns formatted memory context for the agent prompt.
-// Includes long-term memory and recent daily notes.
+// Includes long-term memory, recent daily notes, and session summaries.
 func (ms *MemoryStore) GetMemoryContext() string {
 	longTerm := ms.ReadLongTerm()
 	recentNotes := ms.GetRecentDailyNotes(3)
+	sessionSummary := ms.ReadSessionSummary()
 
-	if longTerm == "" && recentNotes == "" {
+	if longTerm == "" && recentNotes == "" && sessionSummary == "" {
 		return ""
 	}
 
 	var sb strings.Builder
+
+	// Session summary (from /compact command)
+	if sessionSummary != "" {
+		sb.WriteString("## Session Summary\n\n")
+		sb.WriteString(sessionSummary)
+		sb.WriteString("\n\n")
+	}
 
 	if longTerm != "" {
 		sb.WriteString("## Long-term Memory\n\n")
